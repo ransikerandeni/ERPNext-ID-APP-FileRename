@@ -12,6 +12,7 @@ desktop app calls it as ``id_capture_naming_series.api.upload_to_folder``. See
 the app's README for how to install it on a site.
 """
 
+import hashlib
 import os
 import re
 
@@ -70,7 +71,8 @@ def upload_to_folder(
     try:
         folder_record = _folder_record(folder) if folder else None
         file_doc = _register_file(
-            file_name, file_url, is_private, folder_record, doctype, docname, fieldname
+            file_name, file_url, is_private, folder_record,
+            doctype, docname, fieldname, content,
         )
     except Exception:
         # Never leave a file on disk that nothing in the site points at.
@@ -154,14 +156,25 @@ def _unique_path(full_path, file_url, rel_path):
     return f"{stem}{suffix}{ext}", _bump(file_url), _bump(rel_path)
 
 
-def _register_file(file_name, file_url, is_private, folder_record, doctype, docname, fieldname):
-    """Create - or refresh - the File record pointing at the written file."""
+def _register_file(
+    file_name, file_url, is_private, folder_record, doctype, docname, fieldname, content
+):
+    """Create - or refresh - the File record pointing at the written file.
+
+    The record's file_url has to stay exactly the path the file was written to:
+    private files are served by looking a File up by that URL, so a record
+    pointing anywhere else shows as a broken image on the document.
+    """
+    content_hash = hashlib.md5(content).hexdigest()
+
     existing = frappe.db.get_value("File", {"file_url": file_url}, "name")
     if existing:
         file_doc = frappe.get_doc("File", existing)
         file_doc.attached_to_doctype = doctype
         file_doc.attached_to_name = docname
         file_doc.attached_to_field = fieldname
+        file_doc.file_size = len(content)
+        file_doc.content_hash = content_hash
         file_doc.save(ignore_permissions=True)
         return file_doc
 
@@ -174,11 +187,63 @@ def _register_file(file_name, file_url, is_private, folder_record, doctype, docn
         "attached_to_doctype": doctype,
         "attached_to_name": docname,
         "attached_to_field": fieldname,
+        "file_size": len(content),
+        "content_hash": content_hash,
     })
-    # The bytes are already on disk; File must not try to write them again.
-    file_doc.flags.ignore_file_validate = True
+    # The bytes are already on disk. Frappe v15 takes this flag as "the blob is
+    # already there, leave it alone"; older versions have no such flag and save
+    # the content again into a flat path, which _keep_file_url puts right.
+    file_doc.flags.copy_from_existing_file = True
     file_doc.insert(ignore_permissions=True)
+    _keep_file_url(file_doc, file_name, file_url, len(content), content_hash)
     return file_doc
+
+
+def _keep_file_url(file_doc, file_name, file_url, file_size, content_hash):
+    """Undo a re-save that moved the record away from the file we wrote.
+
+    Frappe's File writes the content itself on insert and then points the
+    record at ``/private/files/<file_name>``, flat. That leaves a second, often
+    re-encoded copy of the image outside the folder, and the document's field
+    then references a URL no File record matches - a blank image. Put the
+    record back on our path and clear up the copy.
+    """
+    stray_url = file_doc.file_url
+    if stray_url == file_url and file_doc.file_name == file_name:
+        return
+
+    _remove_stray_copy(file_doc.name, stray_url, file_url)
+    frappe.db.set_value(
+        "File",
+        file_doc.name,
+        {
+            "file_url": file_url,
+            "file_name": file_name,
+            "file_size": file_size,
+            "content_hash": content_hash,
+        },
+        update_modified=False,
+    )
+    file_doc.file_url = file_url
+    file_doc.file_name = file_name
+
+
+def _remove_stray_copy(file_name_doc, stray_url, kept_url):
+    """Delete the extra copy Frappe wrote, if nothing else points at it."""
+    if not stray_url or stray_url == kept_url:
+        return
+    if not stray_url.startswith(("/files/", "/private/files/")):
+        return
+    if frappe.db.count("File", {"file_url": stray_url, "name": ("!=", file_name_doc)}):
+        # Another record legitimately references that file - leave it alone.
+        return
+
+    is_private = stray_url.startswith("/private/files/")
+    tail = stray_url.split("/files/", 1)[1]
+    base = os.path.realpath(get_files_path(is_private=is_private))
+    path = os.path.realpath(os.path.join(base, *tail.split("/")))
+    if path.startswith(base + os.sep) and os.path.isfile(path):
+        os.remove(path)
 
 
 def _folder_record(folder):

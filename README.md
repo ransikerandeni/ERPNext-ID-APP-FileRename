@@ -99,6 +99,36 @@ image. Pass `overwrite=0` to keep both.
 If registering the File fails, the bytes just written are removed again, so a
 failed upload never leaves an orphan on disk.
 
+### Why the File record's URL matters
+
+Frappe serves a private file by looking up a File record whose `file_url` is
+exactly the requested path, so the record has to keep pointing at the file in
+its folder. Frappe's own File doctype writes the content again on insert and
+repoints the record at a flat `/private/files/<name>`, which leaves a second,
+re-encoded copy outside the folder and makes the document show a blank image.
+
+The method sets `copy_from_existing_file`, which Frappe v15 takes as "the blob
+is already there, leave it alone". Older versions have no such flag, so after
+inserting, the record is put back on the folder path and the extra flat copy is
+deleted — but only when no other File record references it.
+
+Uploading the same name again reuses the existing File record and refreshes its
+size and hash instead of adding a second row for the same path.
+
+## Troubleshooting
+
+**A blank image on the document, and a small unreadable copy in
+`private/files/`** — that is this bug, from a version of the app before 0.0.2.
+Update the app, delete the stray flat copies, and capture again:
+
+```bash
+ls -la ~/frappe-bench/sites/example-site/private/files/*.jpg
+```
+
+The healthy image is the one inside the folder named after the field value; the
+flat one of the same name can be removed. Any File record still pointing at the
+flat copy can be deleted from the File list in the Desk.
+
 ## Uninstall
 
 ```bash
