@@ -1,0 +1,19 @@
+[project]
+name = "id_capture_naming_series"
+authors = [
+    { name = "Ransike Randeni", email = "25473775+ransikerandeni@users.noreply.github.com" },
+]
+description = "Folder-aware file uploads for the ID Capture desktop app"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = []
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.frappe-dependencies]
+# Deliberately wide: the endpoint only uses File, get_files_path and
+# has_permission, which are the same on v14 and v15. Narrow this if you pin.
+frappe = ">=14.0.0,<17.0.0"
