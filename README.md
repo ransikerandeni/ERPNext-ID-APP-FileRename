@@ -62,14 +62,34 @@ takes the posted file and:
    **create** on File when no document is given), so it grants nothing the
    normal attachment flow would not.
 3. Writes the bytes to `private/files/<folder>/<file_name>` — or
-   `public/files/…` when the upload is not private — creating the folder on
-   first use.
+   `public/files/…` when the upload is not private.
 4. Creates the matching **File** record, and a File-tree folder of the same name
    under `Home/Attachments`, so ERPNext's file browser mirrors the disk.
 5. Sets the document's field to the new file URL.
 
 It returns the file's `name`, `file_name`, `file_url`, `is_private`, `folder`
 and the site-relative `path` it was written to.
+
+### Folders are reused, never duplicated
+
+A folder is created only when it is not already there. If one named after the
+field's value exists — because an earlier photo, the signature for the same
+person, or someone working directly on the server created it — that folder is
+used as it is, and nothing already in it is touched:
+
+- **On disk**, an existing directory is reused; only a missing one is created.
+- **In ERPNext**, the File-tree folder is matched by its path
+  (`Home/Attachments/<value>`) and, failing that, by a lookup on its name, so a
+  folder created some other way is still found rather than duplicated.
+- Two uploads for the same person arriving at once are safe: the directory is
+  created with `exist_ok`, and a folder record that loses the race is picked up
+  instead of raising.
+
+Matching is exact, so values that differ in case or spacing (`912345678V` and
+`912345678v`) are different folders — they are different field values.
+
+If a plain **file** already occupies the folder's path, the upload stops with a
+clear message rather than failing halfway.
 
 Re-uploading the same name overwrites the file and updates the existing File
 record rather than piling up `-1`, `-2` copies — deliberate, because the name is

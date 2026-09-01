@@ -63,7 +63,7 @@ def upload_to_folder(
     if os.path.exists(full_path) and not overwrite:
         full_path, file_url, rel_path = _unique_path(full_path, file_url, rel_path)
 
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    _ensure_directory(os.path.dirname(full_path))
     with open(full_path, "wb") as f:
         f.write(content)
 
@@ -89,6 +89,19 @@ def upload_to_folder(
         "folder": folder_record or "",
         "path": rel_path,
     }
+
+
+def _ensure_directory(path):
+    """Use the folder that is already there, and create it only when missing."""
+    if os.path.isdir(path):
+        return
+    if os.path.exists(path):
+        frappe.throw(
+            _("Cannot use {0} as a folder: a file of that name is already there").format(path),
+            exc=frappe.exceptions.ValidationError,
+        )
+    # exist_ok covers two uploads for the same person arriving at once.
+    os.makedirs(path, exist_ok=True)
 
 
 def _clean_segment(value, label):
@@ -169,16 +182,32 @@ def _register_file(file_name, file_url, is_private, folder_record, doctype, docn
 
 
 def _folder_record(folder):
-    """The File-tree folder of the same name, so the ERPNext UI matches disk."""
+    """The File-tree folder of the same name, so the ERPNext UI matches disk.
+
+    An existing folder is always reused - by its path, which is how Frappe names
+    folder records, and by a lookup on the name as a fallback. A new one is
+    created only when neither finds anything.
+    """
     parent = "Home/Attachments"
     name = f"{parent}/{folder}"
-    if frappe.db.exists("File", name):
+    if frappe.db.get_value("File", name, "is_folder"):
         return name
+
+    existing = frappe.db.get_value(
+        "File", {"file_name": folder, "is_folder": 1, "folder": parent}, "name"
+    )
+    if existing:
+        return existing
+
     doc = frappe.get_doc({
         "doctype": "File",
         "file_name": folder,
         "is_folder": 1,
         "folder": parent,
     })
-    doc.insert(ignore_permissions=True)
+    try:
+        doc.insert(ignore_permissions=True)
+    except frappe.DuplicateEntryError:
+        # Another upload for the same person created it in between.
+        return name
     return doc.name
