@@ -47,10 +47,17 @@ as root, and replace `example-site` with your site name.
 
 ### 1. Pull the new code
 
+`bench get-app` clones with `--origin upstream`, so the remote is called
+**`upstream`** and there is no `origin` — `git pull origin main` fails with
+*"'origin' does not appear to be a git repository"*:
+
 ```bash
 cd ~/frappe-bench/apps/id_capture_naming_series
-git pull origin main
+git pull upstream main
 ```
+
+`git remote -v` shows the name if you are unsure; a clone made by hand with
+`git clone` will have `origin` instead.
 
 If the pull is refused because of local edits, `git status` shows them.
 `git stash` puts them aside, or `git checkout -- .` throws them away.
@@ -110,6 +117,9 @@ systemd). On a **development** bench there is nothing for it to restart: stop
 cd ~/frappe-bench
 bench update --apps id_capture_naming_series --pull --patch --build --restart-supervisor
 ```
+
+This is also the way round the remote-name problem above: `bench update` pulls
+each app through its own remote, whatever it is called.
 
 Use `--restart-systemd` instead on a systemd bench, and drop the restart flag
 entirely on a development bench. Adding `--no-backup` skips the site backup that
