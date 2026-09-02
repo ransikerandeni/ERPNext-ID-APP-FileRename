@@ -167,7 +167,7 @@ def _register_file(
     """
     content_hash = hashlib.md5(content).hexdigest()
 
-    existing = frappe.db.get_value("File", {"file_url": file_url}, "name")
+    existing = _existing_record(file_url, doctype, docname, fieldname)
     if existing:
         file_doc = frappe.get_doc("File", existing)
         file_doc.attached_to_doctype = doctype
@@ -197,6 +197,24 @@ def _register_file(
     file_doc.insert(ignore_permissions=True)
     _keep_file_url(file_doc, file_name, file_url, len(content), content_hash)
     return file_doc
+
+
+def _existing_record(file_url, doctype, docname, fieldname):
+    """The row for this attachment, if a re-capture is replacing an earlier one.
+
+    Scoped to the document field being attached to. Several rows can share a
+    file_url - Frappe adds one per document field that references it, and
+    ERPNext copies a Student's photo onto the linked Customer - so an unscoped
+    lookup here would re-point another document's attachment at this one.
+    """
+    filters = {"file_url": file_url, "is_folder": 0}
+    if doctype and docname:
+        filters["attached_to_doctype"] = doctype
+        filters["attached_to_name"] = docname
+        filters["attached_to_field"] = fieldname or ("is", "not set")
+    else:
+        filters["attached_to_doctype"] = ("is", "not set")
+    return frappe.db.get_value("File", filters, "name")
 
 
 def _keep_file_url(file_doc, file_name, file_url, file_size, content_hash):
