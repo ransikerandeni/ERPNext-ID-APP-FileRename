@@ -40,15 +40,96 @@ The method is then reachable at
 `/api/method/id_capture_naming_series.api.upload_to_folder`, which is the path
 the desktop app calls by default.
 
-## Upgrading
+## Updating the app
+
+Run everything as the **bench user** (the one that owns `~/frappe-bench`), never
+as root, and replace `example-site` with your site name.
+
+### 1. Pull the new code
 
 ```bash
 cd ~/frappe-bench/apps/id_capture_naming_series
-git pull
+git pull origin main
+```
+
+If the pull is refused because of local edits, `git status` shows them.
+`git stash` puts them aside, or `git checkout -- .` throws them away.
+
+### 2. Reinstall the Python package
+
+Needed when the version or the dependencies changed; harmless otherwise. Run it
+from the bench directory so the bench's own virtualenv is used:
+
+```bash
 cd ~/frappe-bench
+./env/bin/pip install --upgrade -e apps/id_capture_naming_series
+```
+
+The `-e` keeps it an editable install pointing at `apps/`, which is how
+`bench get-app` set it up in the first place.
+
+### 3. Build the assets
+
+```bash
+bench build --app id_capture_naming_series
+```
+
+This app ships no JS or CSS, so the build finishes immediately and is only worth
+running to keep the update routine uniform. Add `--force` to rebuild even when
+nothing changed, and `--production` on a production bench to emit minified
+assets.
+
+### 4. Migrate the site
+
+```bash
 bench --site example-site migrate
+```
+
+Applies patches and syncs any DocTypes and modules. This app currently defines
+none, but `migrate` is what picks them up when it does, and it is safe to run
+when there is nothing to apply. With several sites, use `bench --site all migrate`.
+
+### 5. Clear the cache and restart
+
+```bash
+bench --site example-site clear-cache
 bench restart
 ```
+
+**This is the step that actually loads the new code** — the running workers keep
+imported Python modules in memory, so an edit to `api.py` does nothing until
+they restart. `bench restart` works on a production bench (supervisor or
+systemd). On a **development** bench there is nothing for it to restart: stop
+`bench start` with `Ctrl+C` and start it again.
+
+### All in one command
+
+`bench update` does the same work in one go, limited to this app:
+
+```bash
+cd ~/frappe-bench
+bench update --apps id_capture_naming_series --pull --patch --build --restart-supervisor
+```
+
+Use `--restart-systemd` instead on a systemd bench, and drop the restart flag
+entirely on a development bench. Adding `--no-backup` skips the site backup that
+`bench update` otherwise takes first — quicker, but not advisable in production.
+
+### Check that the update landed
+
+```bash
+bench version --format table
+```
+
+```bash
+bench --site example-site list-apps
+```
+
+Both list `id_capture_naming_series` with its version, which should match
+`__version__` in `id_capture_naming_series/__init__.py` after the pull. The
+desktop app confirms the rest: after a capture, the upload screen reports the
+path the file was stored at, and it should include the folder — for example
+`private/files/200012345678/EDU-STU-IMAGE-26810001.jpg`.
 
 ## What the method does
 
